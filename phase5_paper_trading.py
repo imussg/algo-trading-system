@@ -106,6 +106,7 @@ def is_market_open():
 def job():
     if not is_market_open():
         return
+    print(f"\n --- {datetime.now()} ---")
     for symbol in symbols:
         df = get_live_bars(symbol)
         df = calculate_macd(df)
