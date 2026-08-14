@@ -5,7 +5,7 @@ from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.common.exceptions import APIError
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
-from datetime import timedelta, datetime, time as dtime
+from datetime import timedelta, datetime, time as dtime, timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import os
@@ -22,16 +22,33 @@ data_client = StockHistoricalDataClient(API_KEY, SECRET_KEY)
 
 symbols = ["AAPL", "MSFT", "GOOGL", "JPM", "XOM"]
 
+TIMEFRAME_MAP = {
+    "1Min": TimeFrame(1, TimeFrameUnit.Minute),
+    "5Min": TimeFrame(5, TimeFrameUnit.Minute),
+    "1Hour": TimeFrame(1, TimeFrameUnit.Hour)
+}
+INTERVAL_TIMEDELTA = {
+    "1Min": timedelta(minutes=1),
+    "5Min": timedelta(minutes=5),
+    "1Hour": timedelta(hours=1)
+}
 
 # --- function definitions ---
-def get_live_bars(symbol, lookback=5):
+def get_live_bars(symbol, interval="5Min", lookback=5):
     request = StockBarsRequest(
         symbol_or_symbols=symbol,
-        timeframe=TimeFrame(5, TimeFrameUnit.Minute),
+        timeframe=TIMEFRAME_MAP[interval],
         start=datetime.now() - timedelta(days=lookback)
     )
     bars = data_client.get_stock_bars(request)
-    return bars.df
+    df = bars.df
+
+    # verify that the bar loaded is not a new one that has too few data points to run the 5 minute metrics on
+    if not df.empty:
+        last_bar_start = df.index.get_level_values('timestamp')[-1]
+        if last_bar_start + INTERVAL_TIMEDELTA[interval] > datetime.now(timezone.utc):
+            df = df.iloc[:-1]
+    return df
 
 
 def calculate_macd(df, fast=12, slow=26, signal=9):
@@ -115,6 +132,16 @@ def job():
 
 # --- entry point ---
 if __name__ == "__main__":
+
+    now = datetime.now(ZoneInfo("America/New_York"))
+    
+    # how many minutes away are we from when the whole 5 minute ticker data is published
+    minutes = now.minute % 5
+
+    # delay in seconds to account for possible time needed to calculate and publish
+    delay = 1
+    
+    time.sleep((5 - minutes) * 60 + delay - now.second)
     schedule.every(5).minutes.do(job)
     while True:
         schedule.run_pending()
